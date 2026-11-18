@@ -1,0 +1,45 @@
+{% extends 'base.html' %}
+{% import '_pub.html' as p %}
+{% block title %}UTC 日 {{ day }}{% endblock %}
+{% block content %}
+<div class="card">
+<h2>UTC 日 {{ day }}</h2>
+<p class="muted">该日已提交事件 {{ ev_count }} 条。</p>
+{% if latest %}
+  {% if latest_state == '已过期' %}
+  <div class="warn">最新发布 #{{ latest['pub_id'] }} 已过期（底层数据已变更）。旧发布内容保持可读，重新发布后生效。</div>
+  {% endif %}
+  <form method="post" action="{{ url_for('main.publish', day=day) }}">
+    <button type="submit">重新发布（基于当前已提交事件集）</button>
+  </form>
+  <h3>行程（{{ latest['trip_count'] }}）— 来自发布 #{{ latest['pub_id'] }}</h3>
+  {{ p.trip_table(trips) }}
+  <h3>异常（{{ latest['anomaly_count'] }}）</h3>
+  {{ p.anomaly_table(anomalies, reasons) }}
+{% else %}
+  <p>尚未发布。</p>
+  <form method="post" action="{{ url_for('main.publish', day=day) }}">
+    <button type="submit">发布</button>
+  </form>
+{% endif %}
+</div>
+<div class="card">
+<h3>发布历史</h3>
+<table>
+<tr><th>发布号</th><th>发布时间(UTC)</th><th>事件集版本</th><th>行程</th><th>异常</th><th>状态</th><th></th></tr>
+{% for pub, state in pubs %}
+<tr>
+  <td>#{{ pub['pub_id'] }}</td>
+  <td>{{ pub['created_at'] }}</td>
+  <td>v{{ pub['event_set_version'] }}</td>
+  <td>{{ pub['trip_count'] }}</td>
+  <td>{{ pub['anomaly_count'] }}</td>
+  <td>{% if state == '当前有效' %}<span class="badge b-ok">当前有效</span>{% else %}<span class="badge b-stale">已过期</span>{% endif %}</td>
+  <td><a href="{{ url_for('main.publication', pub_id=pub['pub_id']) }}">查看快照</a></td>
+</tr>
+{% else %}
+<tr><td colspan="7" class="muted">无</td></tr>
+{% endfor %}
+</table>
+</div>
+{% endblock %}

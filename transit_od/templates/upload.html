@@ -1,0 +1,18 @@
+{% extends 'base.html' %}
+{% block title %}上传 CSV{% endblock %}
+{% block content %}
+<div class="card">
+<h2>上传刷卡记录 CSV</h2>
+<p>必需列（表头不区分大小写）：<code>card_id,event_id,revision,ts_utc,station,direction</code></p>
+<ul class="muted">
+  <li><code>revision</code> 为正整数：同一 event_id 仅更高修订替换旧值；同版同文重传沿用旧值；同版异文判冲突，整批失败。</li>
+  <li><code>ts_utc</code> 为 ISO 8601 UTC 时刻，如 <code>2026-11-16T23:30:00Z</code>。</li>
+  <li><code>direction</code> 取值 in / out（兼容 entry / exit、进 / 出）。</li>
+  <li>同一卡号同一时刻出现不同事件，或存在任何冲突，整个批次失败并回滚，不产生半份结果。</li>
+</ul>
+<form method="post" enctype="multipart/form-data">
+  <input type="file" name="file" accept=".csv" required>
+  <button type="submit">上传</button>
+</form>
+</div>
+{% endblock %}

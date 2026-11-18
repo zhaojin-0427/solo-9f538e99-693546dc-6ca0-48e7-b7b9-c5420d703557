@@ -1,0 +1,18 @@
+{% extends 'base.html' %}
+{% import '_pub.html' as p %}
+{% block title %}发布 #{{ pub['pub_id'] }}{% endblock %}
+{% block content %}
+<div class="card">
+<h2>发布 #{{ pub['pub_id'] }} — UTC 日 {{ pub['day'] }}</h2>
+{% if state == '已过期' %}
+<div class="warn">此为历史/过期发布，内容保持可读；当前已提交事件集可能已变化，请以最新发布为准。</div>
+{% endif %}
+<p class="muted">发布时间 {{ pub['created_at'] }} ｜ 基于已提交事件集版本 v{{ pub['event_set_version'] }} ｜ 状态：
+  {% if state == '当前有效' %}<span class="badge b-ok">当前有效</span>{% else %}<span class="badge b-stale">已过期</span>{% endif %}
+</p>
+<h3>行程（{{ pub['trip_count'] }}）</h3>
+{{ p.trip_table(trips) }}
+<h3>异常（{{ pub['anomaly_count'] }}）</h3>
+{{ p.anomaly_table(anomalies, reasons) }}
+</div>
+{% endblock %}

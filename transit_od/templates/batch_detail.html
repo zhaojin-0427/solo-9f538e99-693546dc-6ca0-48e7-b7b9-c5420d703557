@@ -1,0 +1,34 @@
+{% extends 'base.html' %}
+{% block title %}批次 #{{ b['batch_id'] }}{% endblock %}
+{% block content %}
+<div class="card">
+<h2>批次 #{{ b['batch_id'] }}
+  {% if b['status'] == 'committed' %}<span class="badge b-ok">已提交</span>{% else %}<span class="badge b-stale">失败</span>{% endif %}
+</h2>
+<p class="muted">上传时间 {{ b['uploaded_at'] }} ｜ 文件 {{ b['filename'] or '—' }}</p>
+{% if b['status'] == 'failed' %}
+  <p><strong>失败原因：</strong>{{ b['error'] }}</p>
+  <p class="muted">该批次已整体回滚，未改动任何已提交事件。</p>
+{% else %}
+  <p>总行数 {{ b['rows_total'] }} ｜ 新增 {{ b['rows_new'] }} ｜ 更新 {{ b['rows_updated'] }} ｜
+     同版同文沿用 {{ b['rows_unchanged'] }} ｜ 低修订忽略 {{ b['rows_ignored'] }} ｜
+     提交后事件集版本 v{{ b['event_set_version'] }}</p>
+  {% if days %}
+  <p>影响日期：
+    {% for d in days %}<a href="{{ url_for('main.day_detail', day=d) }}">{{ d }}</a> {% endfor %}
+  </p>
+  {% endif %}
+{% endif %}
+</div>
+{% if details %}
+<div class="card">
+<h3>逐事件处理明细</h3>
+<table>
+<tr><th>事件 ID</th><th>处理</th></tr>
+{% for d in details %}
+<tr><td>{{ d.event_id }}</td><td>{{ d.action }}</td></tr>
+{% endfor %}
+</table>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}闸机 OD 行程发布{% endblock %}</title>
+<style>
+body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; margin: 0; background: #f5f6f8; color: #222; }
+nav { background: #1f3a5f; padding: 10px 20px; }
+nav a { color: #fff; margin-right: 18px; text-decoration: none; font-weight: 600; }
+nav a:hover { text-decoration: underline; }
+main { max-width: 1150px; margin: 24px auto; padding: 0 16px; }
+.card { background: #fff; border: 1px solid #e2e5ea; border-radius: 8px; padding: 16px 20px; margin-bottom: 20px; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; margin: 10px 0; }
+th, td { border: 1px solid #e2e5ea; padding: 6px 10px; text-align: left; }
+th { background: #f0f2f5; }
+.badge { display: inline-block; padding: 2px 10px; border-radius: 10px; font-size: 12px; font-weight: 600; }
+.b-ok { background: #e3f5e9; color: #1c7c3c; }
+.b-stale { background: #fdeceb; color: #c0352b; }
+.b-none { background: #eceff3; color: #5a6675; }
+.flash-ok { background: #e3f5e9; color: #1c7c3c; padding: 10px 14px; border-radius: 6px; margin-bottom: 14px; }
+.flash-err { background: #fdeceb; color: #c0352b; padding: 10px 14px; border-radius: 6px; margin-bottom: 14px; }
+button { background: #1f3a5f; color: #fff; border: 0; border-radius: 6px; padding: 7px 16px; font-size: 14px; cursor: pointer; }
+button:hover { background: #2a4f80; }
+.muted { color: #7a8494; font-size: 13px; }
+.warn { background: #fff7e0; border: 1px solid #f0d98c; padding: 10px 14px; border-radius: 6px; margin-bottom: 14px; }
+code { background: #eef1f5; padding: 1px 5px; border-radius: 4px; }
+form.inline { display: inline; }
+</style>
+</head>
+<body>
+<nav>
+  <a href="{{ url_for('main.days') }}">日期与发布</a>
+  <a href="{{ url_for('main.upload') }}">上传 CSV</a>
+  <a href="{{ url_for('main.batches') }}">批次记录</a>
+  <a href="{{ url_for('main.events') }}">已提交事件</a>
+</nav>
+<main>
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% for cat, msg in messages %}
+    <div class="{{ 'flash-ok' if cat == 'ok' else 'flash-err' }}">{{ msg }}</div>
+  {% endfor %}
+{% endwith %}
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>

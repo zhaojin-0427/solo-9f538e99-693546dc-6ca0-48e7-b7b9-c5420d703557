@@ -1,0 +1,24 @@
+{% extends 'base.html' %}
+{% block title %}批次记录{% endblock %}
+{% block content %}
+<div class="card">
+<h2>上传批次记录</h2>
+<table>
+<tr><th>批次</th><th>上传时间(UTC)</th><th>文件名</th><th>状态</th><th>总行数</th><th>新增</th><th>更新</th><th>沿用</th><th>忽略</th><th>事件集版本</th><th></th></tr>
+{% for b in rows %}
+<tr>
+  <td>#{{ b['batch_id'] }}</td>
+  <td>{{ b['uploaded_at'] }}</td>
+  <td>{{ b['filename'] }}</td>
+  <td>{% if b['status'] == 'committed' %}<span class="badge b-ok">已提交</span>{% else %}<span class="badge b-stale">失败</span>{% endif %}</td>
+  <td>{{ b['rows_total'] }}</td><td>{{ b['rows_new'] }}</td><td>{{ b['rows_updated'] }}</td>
+  <td>{{ b['rows_unchanged'] }}</td><td>{{ b['rows_ignored'] }}</td>
+  <td>{{ 'v' ~ b['event_set_version'] if b['event_set_version'] is not none else '—' }}</td>
+  <td><a href="{{ url_for('main.batch_detail', batch_id=b['batch_id']) }}">详情</a></td>
+</tr>
+{% else %}
+<tr><td colspan="11" class="muted">暂无批次</td></tr>
+{% endfor %}
+</table>
+</div>
+{% endblock %}

@@ -1,0 +1,34 @@
+{% extends 'base.html' %}
+{% block title %}日期与发布{% endblock %}
+{% block content %}
+<div class="card">
+<h2>按 UTC 日的行程发布</h2>
+<p class="muted">跨午夜行程计入进站日；孤立出站计入其自身日期。补传或更正使某日数据变化后，该日发布会标记为「已过期」，可重新发布；历史发布保持可读。</p>
+<table>
+<tr><th>UTC 日期</th><th>已提交事件数</th><th>最新发布</th><th>发布时间(UTC)</th><th>行程数</th><th>异常数</th><th>状态</th><th>操作</th></tr>
+{% for r in rows %}
+<tr>
+  <td><a href="{{ url_for('main.day_detail', day=r.day) }}">{{ r.day }}</a></td>
+  <td>{{ r.events }}</td>
+  <td>{% if r.pub %}#{{ r.pub['pub_id'] }}{% else %}—{% endif %}</td>
+  <td>{{ r.pub['created_at'] if r.pub else '—' }}</td>
+  <td>{{ r.pub['trip_count'] if r.pub else '—' }}</td>
+  <td>{{ r.pub['anomaly_count'] if r.pub else '—' }}</td>
+  <td>
+    {% if r.state == '当前有效' %}<span class="badge b-ok">当前有效</span>
+    {% elif r.state == '已过期' %}<span class="badge b-stale">已过期</span>
+    {% else %}<span class="badge b-none">未发布</span>{% endif %}
+  </td>
+  <td>
+    <form class="inline" method="post" action="{{ url_for('main.publish', day=r.day) }}">
+      <button type="submit">{{ '重新发布' if r.pub else '发布' }}</button>
+    </form>
+    <a href="{{ url_for('main.day_detail', day=r.day) }}">查看</a>
+  </td>
+</tr>
+{% else %}
+<tr><td colspan="8" class="muted">暂无数据，请先上传 CSV。</td></tr>
+{% endfor %}
+</table>
+</div>
+{% endblock %}

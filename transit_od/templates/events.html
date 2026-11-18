@@ -1,0 +1,19 @@
+{% extends 'base.html' %}
+{% block title %}已提交事件{% endblock %}
+{% block content %}
+<div class="card">
+<h2>已提交事件（当前事件集，最多显示 2000 条）</h2>
+<table>
+<tr><th>卡号</th><th>事件 ID</th><th>修订</th><th>时刻(UTC)</th><th>站点</th><th>方向</th><th>来源批次</th></tr>
+{% for e in rows %}
+<tr>
+  <td>{{ e['card_id'] }}</td><td>{{ e['event_id'] }}</td><td>{{ e['revision'] }}</td>
+  <td>{{ e['ts_utc'] }}</td><td>{{ e['station'] }}</td>
+  <td>{{ '进站' if e['direction'] == 'in' else '出站' }}</td><td>#{{ e['batch_id'] }}</td>
+</tr>
+{% else %}
+<tr><td colspan="7" class="muted">暂无事件</td></tr>
+{% endfor %}
+</table>
+</div>
+{% endblock %}

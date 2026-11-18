@@ -1,0 +1,27 @@
+{% macro trip_table(trips) %}
+<table>
+<tr><th>卡号</th><th>进站事件</th><th>进站站点</th><th>进站时刻(UTC)</th><th>出站事件</th><th>出站站点</th><th>出站时刻(UTC)</th><th>时长(分钟)</th></tr>
+{% for t in trips %}
+<tr>
+  <td>{{ t['card_id'] }}</td><td>{{ t['entry_event_id'] }}</td><td>{{ t['entry_station'] }}</td><td>{{ t['entry_ts'] }}</td>
+  <td>{{ t['exit_event_id'] }}</td><td>{{ t['exit_station'] }}</td><td>{{ t['exit_ts'] }}</td><td>{{ t['duration_min'] }}</td>
+</tr>
+{% else %}
+<tr><td colspan="8" class="muted">无行程</td></tr>
+{% endfor %}
+</table>
+{% endmacro %}
+
+{% macro anomaly_table(anomalies, reasons) %}
+<table>
+<tr><th>卡号</th><th>事件 ID</th><th>时刻(UTC)</th><th>站点</th><th>方向</th><th>异常原因</th></tr>
+{% for a in anomalies %}
+<tr>
+  <td>{{ a['card_id'] }}</td><td>{{ a['event_id'] }}</td><td>{{ a['ts_utc'] }}</td><td>{{ a['station'] }}</td>
+  <td>{{ '进站' if a['direction'] == 'in' else '出站' }}</td><td>{{ reasons.get(a['reason'], a['reason']) }}</td>
+</tr>
+{% else %}
+<tr><td colspan="6" class="muted">无异常</td></tr>
+{% endfor %}
+</table>
+{% endmacro %}
