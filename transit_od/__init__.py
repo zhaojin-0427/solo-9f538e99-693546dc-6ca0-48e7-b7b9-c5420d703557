@@ -29,6 +29,8 @@ def create_app(db_path=None):
     def _close_db(exc):
         db = g.pop("db", None)
         if db is not None:
+            if db.in_transaction:
+                db.rollback()  # 结束页面读事务，释放快照，避免长期占住 WAL
             db.close()
 
     return app

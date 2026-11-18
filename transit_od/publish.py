@@ -1,15 +1,23 @@
 """按 UTC 日发布行程与异常。
 
 发布语义：
-- 发布在单个 BEGIN IMMEDIATE 事务内完成：读取已提交事件集 → 配对 → 写入快照，
-  与上传互斥（SQLite 写锁），因此每份发布都基于同一已提交事件集，不会出现半份结果。
+- 发布在单个 BEGIN IMMEDIATE 事务内完成：读取已提交事件集 → 配对 → 计算闸机验收 →
+  写入快照，与上传/终号登记互斥（SQLite 写锁），因此行程、验收结论与发布必定取自
+  同一已提交状态。
 - 跨午夜行程归进站日；孤立出站归自身日期；悬空进站归进站自身日期。
+- 已登记闸机日存在缺号时拒绝新发布（抛 GateAcceptanceError），事务回滚。
 - 重新发布时旧发布置为 superseded，内容保留可读；若发布后该日数据版本前进，
-  页面将其标记为"已过期"。
+  页面将其标记为"已过期"。发布时保存的闸机验收快照只用于历史快照页展示，
+  当前页面状态始终按最新已提交状态重算。
 """
 from .db import get_day_version, get_esv, now_iso
+from .gates import acceptance_for_day, blocking_message
 from .ingest import day_of, datetime_from_us
 from .pairing import build_results
+
+
+class GateAcceptanceError(Exception):
+    """该日已登记闸机日有缺号，禁止发布。"""
 
 
 def _load_events(conn):
@@ -36,14 +44,19 @@ def publish_day(conn, day):
         day_trips = [(e, x) for e, x in trips if day_of(e["ts"]) == day]
         day_anoms = [(ev, reason) for ev, reason in anomalies if day_of(ev["ts"]) == day]
 
+        acceptance = acceptance_for_day(conn, day)
+        if acceptance["blocking"]:
+            raise GateAcceptanceError(blocking_message(acceptance))
+
         esv = get_esv(conn)
         dv = get_day_version(conn, day)
 
         conn.execute("UPDATE publications SET status='superseded' WHERE day=? AND status='current'", (day,))
         cur = conn.execute(
-            "INSERT INTO publications(day, created_at, event_set_version, day_version, status, trip_count, anomaly_count)"
-            " VALUES(?,?,?,?,?,?,?)",
-            (day, now_iso(), esv, dv, "current", len(day_trips), len(day_anoms)),
+            "INSERT INTO publications(day, created_at, event_set_version, day_version, status,"
+            " trip_count, anomaly_count, gate_status, gate_acceptance) VALUES(?,?,?,?,?,?,?,?,?)",
+            (day, now_iso(), esv, dv, "current", len(day_trips), len(day_anoms),
+             acceptance["status"], acceptance["snapshot"]),
         )
         pub_id = cur.lastrowid
         for e, x in day_trips:

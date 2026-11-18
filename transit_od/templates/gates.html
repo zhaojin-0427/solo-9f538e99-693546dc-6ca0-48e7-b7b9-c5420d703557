@@ -1,0 +1,58 @@
+{% extends 'base.html' %}
+{% block title %}闸机验收{% endblock %}
+{% block content %}
+<div class="card">
+<h2>闸机日流水验收</h2>
+<p class="muted">
+  按闸机 ID 与事件所在 UTC 日汇总流水号；只有同时带 <code>gate_id</code> 与 <code>seq</code>
+  的记录计入验收，缺少流水号的旧记录不计入。已登记终号的闸机日按 1..终号核对，
+  缺号即整日为「缺号」，禁止发布该 UTC 日行程；乱序补传填齐后自动恢复完整。
+</p>
+<table>
+<tr><th>UTC 日期</th><th>验收状态</th><th>缺号合计</th><th>闸机数</th><th></th></tr>
+{% for r in rows %}
+<tr>
+  <td><a href="{{ url_for('main.day_detail', day=r.day) }}">{{ r.day }}</a></td>
+  <td>
+    {% if r.status == 'complete' %}<span class="badge b-ok">完整</span>
+    {% elif r.status == 'incomplete' %}<span class="badge b-stale">缺号</span>
+    {% elif r.status == 'pending' %}<span class="badge b-warn">待登记终号</span>
+    {% else %}<span class="badge b-none">无闸机流水</span>{% endif %}
+  </td>
+  <td>{{ r.missing_total }}</td>
+  <td>{{ r.entries|length }}</td>
+  <td><a href="{{ url_for('main.day_detail', day=r.day) }}">查看明细</a></td>
+</tr>
+{% for e in r.entries %}
+<tr>
+  <td class="muted">↳ {{ e.gate_id }}</td>
+  <td class="muted">
+    {% if e.status == 'complete' %}<span class="badge b-ok">完整</span>
+    {% elif e.status == 'incomplete' %}<span class="badge b-stale">缺号</span>
+    {% else %}<span class="badge b-warn">未登记终号</span>{% endif %}
+  </td>
+  <td class="muted">终号 {{ e.end_seq if e.end_seq is not none else '—' }} ｜ 已收 {{ e.present_count }}
+    ｜ 缺号区间 {{ e.missing_ranges|join('; ') if e.missing_ranges else '—' }}
+    {% if e.extra_seqs %}｜ 超出终号 {{ e.extra_seqs|join(', ') }}{% endif %}
+    {% if e.duplicates %}｜ 重复号 {{ e.duplicates|join(', ') }}{% endif %}
+  </td>
+  <td colspan="2"></td>
+</tr>
+{% endfor %}
+{% else %}
+<tr><td colspan="5" class="muted">暂无闸机流水或终号登记。</td></tr>
+{% endfor %}
+</table>
+</div>
+
+<div class="card">
+<h3>登记闸机日终号</h3>
+<p class="muted">同一闸机同一 UTC 日重复登记时以最新终号为准；登记只影响验收结论与发布准入，不改动事件。</p>
+<form method="post" action="{{ url_for('main.gate_register') }}">
+  <label>闸机 ID <input name="gate_id" required maxlength="200"></label>
+  <label>UTC 日期 <input name="day" type="date" required></label>
+  <label>日终号 <input name="end_seq" type="number" min="1" step="1" required></label>
+  <button type="submit">登记</button>
+</form>
+</div>
+{% endblock %}

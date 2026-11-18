@@ -247,3 +247,300 @@ def test_persistence_across_restart(app, client, tmp_path):
     page = client2.get("/days/2026-11-16").get_data(as_text=True)
     assert "行程（1）" in page and "异常（5）" in page
     assert q1(app2, "SELECT COUNT(*) n FROM events")["n"] == 9
+
+
+# ---------- 闸机日流水验收 ----------
+
+GATE_HEADER = "card_id,event_id,revision,ts_utc,station,direction,gate_id,seq\n"
+
+
+def register(client, gate_id, day, end_seq):
+    return client.post("/gates/register", data={"gate_id": gate_id, "day": day, "end_seq": str(end_seq)})
+
+
+def gate_day(app, day):
+    from transit_od.gates import acceptance_for_day
+    conn = connect(app.config["DB_PATH"])
+    try:
+        return acceptance_for_day(conn, day)
+    finally:
+        conn.close()
+
+
+def test_legacy_csv_without_gate_columns_still_uploads(app, client):
+    upload(client, BASE)
+    assert q1(app, "SELECT COUNT(*) n FROM batches WHERE status='committed'")["n"] == 1
+    assert q1(app, "SELECT COUNT(*) n FROM events WHERE gate_id IS NULL")["n"] == 9
+    assert gate_day(app, "2026-11-16")["status"] == "none"
+
+
+def test_same_revision_can_backfill_gate_metadata_on_legacy_event(app, client):
+    """旧记录原本没有流水号：同版同文补录闸机/流水号应被接受并计入验收。"""
+    upload(client, BASE)  # 无闸机列的旧文件
+    upload(client, GATE_HEADER + "C002,E4,1,2026-11-16T09:00:00Z,Gamma,out,GA,7\n")
+    b = q1(app, "SELECT * FROM batches ORDER BY batch_id DESC LIMIT 1")
+    assert b["status"] == "committed" and b["rows_updated"] == 1
+    ev = q1(app, "SELECT * FROM events WHERE event_id='E4'")
+    assert ev["gate_id"] == "GA" and ev["seq"] == 7
+    assert gate_day(app, "2026-11-16")["entries"][0]["present_seqs"] == [7]
+
+
+def test_same_revision_omitting_gate_keeps_committed_metadata(app, client):
+    upload(client, GATE_HEADER + "C002,E4,1,2026-11-16T09:00:00Z,Gamma,out,GA,7\n")
+    upload(client, BASE)  # 无闸机列的同版重传：沿用
+    b = q1(app, "SELECT * FROM batches ORDER BY batch_id DESC LIMIT 1")
+    assert b["status"] == "committed" and b["rows_unchanged"] == 1 and b["rows_new"] == 8
+    ev = q1(app, "SELECT * FROM events WHERE event_id='E4'")
+    assert ev["gate_id"] == "GA" and ev["seq"] == 7
+
+
+def test_same_revision_different_gate_metadata_conflicts(app, client):
+    upload(client, GATE_HEADER + "C2,E4,1,2026-11-16T09:00:00Z,Gamma,out,GA,7\n")
+    upload(client, GATE_HEADER + "C2,E4,1,2026-11-16T09:00:00Z,Gamma,out,GA,8\n")
+    b = q1(app, "SELECT * FROM batches ORDER BY batch_id DESC LIMIT 1")
+    assert b["status"] == "failed" and "闸机/流水号" in b["error"]
+    assert q1(app, "SELECT seq FROM events WHERE event_id='E4'")["seq"] == 7
+
+
+def test_gate_rows_missing_seq_do_not_count(app, client):
+    upload(client, GATE_HEADER + """\
+C1,G1,1,2026-11-16T08:00:00Z,S1,in,GA,1
+C1,G2,1,2026-11-16T09:00:00Z,S2,out,GA,
+C2,G3,1,2026-11-16T10:00:00Z,S1,in,,
+""")
+    assert q1(app, "SELECT COUNT(*) n FROM events")["n"] == 3
+    acc = gate_day(app, "2026-11-16")
+    assert acc["status"] == "pending"
+    assert len(acc["entries"]) == 1
+    assert acc["entries"][0]["gate_id"] == "GA" and acc["entries"][0]["present_seqs"] == [1]
+
+
+def test_register_end_seq_shows_missing_ranges_and_blocks_publish(app, client):
+    upload(client, GATE_HEADER + """\
+C1,G1,1,2026-11-16T08:00:00Z,S1,in,GA,1
+C1,G2,1,2026-11-16T09:00:00Z,S2,out,GA,2
+C2,G3,1,2026-11-16T10:00:00Z,S1,in,GA,5
+""")
+    register(client, "GA", "2026-11-16", 7)
+    acc = gate_day(app, "2026-11-16")
+    assert acc["status"] == "incomplete" and acc["blocking"]
+    assert acc["entries"][0]["missing_ranges"] == ["3-4", "6-7"]
+    assert acc["missing_total"] == 4
+
+    page = client.get("/days/2026-11-16").get_data(as_text=True)
+    assert "缺号" in page and "3-4" in page and "6-7" in page
+    assert "禁止发布" in page
+    # 发布被拒，不产生发布记录
+    publish(client, "2026-11-16")
+    assert q1(app, "SELECT COUNT(*) n FROM publications")["n"] == 0
+
+
+def test_out_of_order_backfill_restores_complete_and_allows_publish(app, client):
+    upload(client, GATE_HEADER + """\
+C1,G1,1,2026-11-16T08:00:00Z,S1,in,GA,1
+C1,G2,1,2026-11-16T09:00:00Z,S2,out,GA,3
+""")
+    register(client, "GA", "2026-11-16", 3)
+    assert gate_day(app, "2026-11-16")["status"] == "incomplete"
+    # 乱序补传填补缺口
+    upload(client, GATE_HEADER + "C2,G9,1,2026-11-16T09:30:00Z,S1,in,GA,2\n")
+    acc = gate_day(app, "2026-11-16")
+    assert acc["status"] == "complete" and not acc["blocking"]
+    publish(client, "2026-11-16")
+    assert q1(app, "SELECT COUNT(*) n FROM publications WHERE day='2026-11-16'")["n"] == 1
+
+
+def test_unregistered_gate_day_is_pending_not_blocking(app, client):
+    upload(client, GATE_HEADER + "C1,G1,1,2026-11-16T08:00:00Z,S1,in,GA,1\n")
+    acc = gate_day(app, "2026-11-16")
+    assert acc["status"] == "pending" and not acc["blocking"]
+    publish(client, "2026-11-16")
+    assert q1(app, "SELECT gate_status FROM publications")["gate_status"] == "pending"
+
+
+def test_same_gate_day_seq_for_different_event_fails_whole_batch(app, client):
+    upload(client, GATE_HEADER + "C1,G1,1,2026-11-16T08:00:00Z,S1,in,GA,1\n")
+    upload(client, GATE_HEADER + """\
+C2,G2,1,2026-11-16T09:00:00Z,S1,in,GA,1
+C3,G3,1,2026-11-16T10:00:00Z,S1,in,GA,2
+""")
+    b = q1(app, "SELECT * FROM batches ORDER BY batch_id DESC LIMIT 1")
+    assert b["status"] == "failed" and "同闸机同日同流水号" in b["error"]
+    # 整批回滚：G3 未写入
+    assert q1(app, "SELECT COUNT(*) n FROM events")["n"] == 1
+
+
+def test_same_gate_day_seq_within_one_batch_fails(app, client):
+    upload(client, GATE_HEADER + """\
+C1,G1,1,2026-11-16T08:00:00Z,S1,in,GA,1
+C2,G2,1,2026-11-16T09:00:00Z,S1,in,GA,1
+""")
+    b = q1(app, "SELECT * FROM batches ORDER BY batch_id DESC LIMIT 1")
+    assert b["status"] == "failed" and "同闸机同日同流水号" in b["error"]
+    assert q1(app, "SELECT COUNT(*) n FROM events")["n"] == 0
+
+
+def test_higher_revision_moving_gate_day_and_seq_recomputes_both_places(app, client):
+    upload(client, GATE_HEADER + """\
+C1,G1,1,2026-11-16T08:00:00Z,S1,in,GA,1
+C2,G2,1,2026-11-16T09:00:00Z,S1,in,GA,2
+C3,G3,1,2026-11-17T08:00:00Z,S1,in,GB,1
+""")
+    register(client, "GA", "2026-11-16", 3)  # 3 缺号
+    register(client, "GB", "2026-11-17", 1)
+    assert gate_day(app, "2026-11-16")["status"] == "incomplete"
+    assert gate_day(app, "2026-11-17")["status"] == "complete"
+
+    # 高修订把 G2 从 GA/11-16/seq2 移到 GB/11-17/seq2（该日终号 2）
+    register(client, "GB", "2026-11-17", 2)
+    upload(client, GATE_HEADER + "C2,G2,2,2026-11-17T09:00:00Z,S1,in,GB,2\n")
+
+    old = gate_day(app, "2026-11-16")
+    new = gate_day(app, "2026-11-17")
+    assert old["entries"][0]["present_seqs"] == [1]
+    assert old["entries"][0]["missing_ranges"] == ["2-3"]
+    assert new["status"] == "complete" and new["entries"][0]["present_seqs"] == [1, 2]
+
+
+def test_registration_after_publish_stales_publication_but_keeps_readable(app, client):
+    upload(client, GATE_HEADER + """\
+C1,G1,1,2026-11-16T08:00:00Z,S1,in,GA,1
+C1,G2,1,2026-11-16T09:00:00Z,S2,out,GA,2
+""")
+    publish(client, "2026-11-16")
+    pub_id = q1(app, "SELECT pub_id FROM publications")["pub_id"]
+    assert "当前有效" in client.get(f"/publications/{pub_id}").get_data(as_text=True)
+
+    # 登记终号 3 → 出现缺号，旧发布不再显示为当前可供数
+    register(client, "GA", "2026-11-16", 3)
+    page = client.get(f"/publications/{pub_id}").get_data(as_text=True)
+    assert "已过期" in page and "不应继续作为可供数结果使用" in page
+    day_page = client.get("/days/2026-11-16").get_data(as_text=True)
+    assert "缺号" in day_page and "禁止发布" in day_page
+    # 快照内容仍可查看
+    assert "C1" in page
+
+    # 缺号期间不能重新发布
+    publish(client, "2026-11-16")
+    assert q1(app, "SELECT COUNT(*) n FROM publications")["n"] == 1
+    # 补传后恢复完整并可发布，旧发布标 superseded
+    upload(client, GATE_HEADER + "C2,G3,1,2026-11-16T09:30:00Z,S1,in,GA,3\n")
+    publish(client, "2026-11-16")
+    assert q1(app, "SELECT status FROM publications WHERE pub_id=?", (pub_id,))["status"] == "superseded"
+
+
+def test_publication_snapshot_holds_acceptance_at_publish_time(app, client):
+    upload(client, GATE_HEADER + """\
+C1,G1,1,2026-11-16T08:00:00Z,S1,in,GA,1
+C1,G2,1,2026-11-16T09:00:00Z,S2,out,GA,2
+""")
+    register(client, "GA", "2026-11-16", 2)
+    publish(client, "2026-11-16")
+    pub = q1(app, "SELECT * FROM publications")
+    assert pub["gate_status"] == "complete"
+    import json
+    snap = json.loads(pub["gate_acceptance"])
+    assert snap["status"] == "complete"
+    assert snap["entries"][0]["present_count"] == 2
+    assert snap["entries"][0]["missing_ranges"] == []
+
+
+def test_gate_sequence_day_is_event_utc_day(app, client):
+    upload(client, GATE_HEADER + """\
+C1,G1,1,2026-11-16T23:00:00Z,S1,in,GA,1
+C2,G2,1,2026-11-17T01:00:00Z,S1,in,GA,1
+""")
+    register(client, "GA", "2026-11-16", 1)
+    register(client, "GA", "2026-11-17", 1)
+    assert gate_day(app, "2026-11-16")["status"] == "complete"
+    assert gate_day(app, "2026-11-17")["status"] == "complete"
+    # 同一流水号在不同 UTC 日不冲突
+    assert q1(app, "SELECT status FROM batches ORDER BY batch_id DESC LIMIT 1")["status"] == "committed"
+
+
+def test_extra_sequence_beyond_registered_end_is_incomplete(app, client):
+    upload(client, GATE_HEADER + """\
+C1,G1,1,2026-11-16T08:00:00Z,S1,in,GA,1
+C3,G3,1,2026-11-16T10:00:00Z,S1,in,GA,5
+""")
+    register(client, "GA", "2026-11-16", 3)
+    acc = gate_day(app, "2026-11-16")
+    assert acc["status"] == "incomplete"
+    entry = acc["entries"][0]
+    assert entry["missing_ranges"] == ["2-3"]
+    assert entry["extra_seqs"] == [5]
+    assert entry["duplicates"] == []
+    assert "缺号" in client.get("/days").get_data(as_text=True)
+
+
+def test_duplicate_sequence_in_committed_data_is_incomplete(app, client):
+    """正常入口会拒绝同闸机同日同号不同事件；这里模拟历史/损坏数据，
+    验收仍须把重复号视为不完整。"""
+    upload(client, GATE_HEADER + "C1,G1,1,2026-11-16T08:00:00Z,S1,in,GA,1\n")
+    conn = connect(app.config["DB_PATH"])
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(
+            "INSERT INTO events(event_id, revision, card_id, ts_utc, ts_epoch_us, station, direction,"
+            " gate_id, seq, batch_id, updated_at) VALUES('G2',1,'C2','2026-11-16T09:00:00Z',0,'S1','in',"
+            "'GA',1,1,'2026-11-16T00:00:00Z')"
+        )
+        conn.execute("COMMIT")
+    finally:
+        conn.close()
+    register(client, "GA", "2026-11-16", 1)
+    acc = gate_day(app, "2026-11-16")
+    assert acc["status"] == "incomplete"
+    assert acc["entries"][0]["duplicates"] == [1]
+
+
+def test_gates_page_renders_and_register_validation(app, client):
+    upload(client, GATE_HEADER + "C1,G1,1,2026-11-16T08:00:00Z,S1,in,GA,1\n")
+    resp = client.get("/gates")
+    assert resp.status_code == 200 and "闸机日流水验收" in resp.get_data(as_text=True)
+    # 非法终号不写库
+    register(client, "GA", "2026-11-16", 0)
+    assert q1(app, "SELECT COUNT(*) n FROM gate_day_registrations")["n"] == 0
+    register(client, "GA", "2026-11-16", 1)
+    assert q1(app, "SELECT COUNT(*) n FROM gate_day_registrations")["n"] == 1
+    assert "完整" in client.get("/gates").get_data(as_text=True)
+
+
+def test_failed_batch_does_not_change_acceptance(app, client):
+    upload(client, GATE_HEADER + "C1,G1,1,2026-11-16T08:00:00Z,S1,in,GA,1\n")
+    register(client, "GA", "2026-11-16", 2)
+    before = gate_day(app, "2026-11-16")
+    # 失败批次：同闸机同日同号不同事件
+    upload(client, GATE_HEADER + "C2,G2,1,2026-11-16T09:00:00Z,S1,in,GA,1\n")
+    after = gate_day(app, "2026-11-16")
+    assert before["snapshot"] == after["snapshot"]
+    assert q1(app, "SELECT status FROM batches ORDER BY batch_id DESC LIMIT 1")["status"] == "failed"
+
+
+def test_old_database_is_migrated_in_place(tmp_path):
+    """旧库（无 gate 列、无发布验收列）重启后自动迁移，旧发布仍可读。"""
+    import sqlite3
+    db_path = str(tmp_path / "old.db")
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);"
+        "INSERT INTO meta VALUES('event_set_version','1');"
+        "CREATE TABLE events (event_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, card_id TEXT NOT NULL,"
+        " ts_utc TEXT NOT NULL, ts_epoch_us INTEGER NOT NULL, station TEXT NOT NULL,"
+        " direction TEXT NOT NULL, batch_id INTEGER NOT NULL, updated_at TEXT NOT NULL);"
+        "CREATE TABLE publications (pub_id INTEGER PRIMARY KEY AUTOINCREMENT, day TEXT NOT NULL,"
+        " created_at TEXT NOT NULL, event_set_version INTEGER NOT NULL, day_version INTEGER NOT NULL,"
+        " status TEXT NOT NULL, trip_count INTEGER NOT NULL, anomaly_count INTEGER NOT NULL);"
+        "INSERT INTO events VALUES('E1',1,'C1','2026-11-16T08:00:00Z',"
+        " 1763270400000000,'S1','in',1,'2026-11-16T00:00:00Z');"
+        "INSERT INTO publications(day,created_at,event_set_version,day_version,status,trip_count,anomaly_count)"
+        " VALUES('2026-11-16','2026-11-16T00:00:00Z',1,0,'current',1,0);"
+    )
+    conn.commit()
+    conn.close()
+
+    app = create_app(db_path)
+    client = app.test_client()
+    assert client.get("/publications/1").status_code == 200
+    assert q1(app, "SELECT COUNT(*) n FROM events WHERE gate_id IS NULL")["n"] == 1
+    assert client.get("/gates").status_code == 200

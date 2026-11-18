@@ -5,28 +5,72 @@
 <div class="card">
 <h2>UTC 日 {{ day }}</h2>
 <p class="muted">该日已提交事件 {{ ev_count }} 条。</p>
+
+<h3>闸机流水验收：
+  {% if gate.status == 'complete' %}<span class="badge b-ok">完整</span>
+  {% elif gate.status == 'incomplete' %}<span class="badge b-stale">缺号</span>
+  {% elif gate.status == 'pending' %}<span class="badge b-warn">待登记终号</span>
+  {% else %}<span class="badge b-none">无闸机流水</span>{% endif %}
+</h3>
+{% if gate.blocking %}
+<div class="warn">该日已登记闸机日存在缺号，禁止发布该日行程。补传填齐缺口后恢复可发布。</div>
+{% endif %}
+{% if gate.entries %}
+<table>
+<tr><th>闸机 ID</th><th>登记终号</th><th>已收到流水</th><th>最大号</th><th>缺号区间</th><th>超出终号</th><th>重复号</th><th>状态</th></tr>
+{% for e in gate.entries %}
+<tr>
+  <td>{{ e.gate_id }}</td>
+  <td>{{ e.end_seq if e.end_seq is not none else '—' }}</td>
+  <td>{{ e.present_count }}</td>
+  <td>{{ e.max_seq if e.max_seq is not none else '—' }}</td>
+  <td>{{ e.missing_ranges|join('; ') if e.missing_ranges else '—' }}</td>
+  <td>{{ e.extra_seqs|join(', ') if e.extra_seqs else '—' }}</td>
+  <td>{{ e.duplicates|join(', ') if e.duplicates else '—' }}</td>
+  <td>
+    {% if e.status == 'complete' %}<span class="badge b-ok">完整</span>
+    {% elif e.status == 'incomplete' %}<span class="badge b-stale">缺号</span>
+    {% else %}<span class="badge b-warn">未登记终号</span>{% endif %}
+  </td>
+</tr>
+{% endfor %}
+</table>
+{% else %}
+<p class="muted">该日没有带闸机与流水号的事件，也没有终号登记。</p>
+{% endif %}
+</div>
+
+<div class="card">
 {% if latest %}
   {% if latest_state == '已过期' %}
-  <div class="warn">最新发布 #{{ latest['pub_id'] }} 已过期（底层数据已变更）。旧发布内容保持可读，重新发布后生效。</div>
+  <div class="warn">最新发布 #{{ latest['pub_id'] }} 已过期（底层数据或闸机验收已变更）。旧发布内容保持可读，但不再作为当前可供数的结果；重新发布后生效。</div>
   {% endif %}
+  {% if gate.blocking %}
+  <p class="muted">当前存在缺号，发布按钮暂不可用。</p>
+  {% else %}
   <form method="post" action="{{ url_for('main.publish', day=day) }}">
     <button type="submit">重新发布（基于当前已提交事件集）</button>
   </form>
-  <h3>行程（{{ latest['trip_count'] }}）— 来自发布 #{{ latest['pub_id'] }}</h3>
+  {% endif %}
+  <h3>行程（{{ latest['trip_count'] }}）— 来自发布 #{{ latest['pub_id'] }}{% if latest_state == '已过期' %}（已过期，仅供查看，不作为当前可供数结果）{% endif %}</h3>
   {{ p.trip_table(trips) }}
   <h3>异常（{{ latest['anomaly_count'] }}）</h3>
   {{ p.anomaly_table(anomalies, reasons) }}
 {% else %}
   <p>尚未发布。</p>
+  {% if gate.blocking %}
+  <p class="muted">当前存在缺号，发布按钮暂不可用。</p>
+  {% else %}
   <form method="post" action="{{ url_for('main.publish', day=day) }}">
     <button type="submit">发布</button>
   </form>
+  {% endif %}
 {% endif %}
 </div>
 <div class="card">
 <h3>发布历史</h3>
 <table>
-<tr><th>发布号</th><th>发布时间(UTC)</th><th>事件集版本</th><th>行程</th><th>异常</th><th>状态</th><th></th></tr>
+<tr><th>发布号</th><th>发布时间(UTC)</th><th>事件集版本</th><th>行程</th><th>异常</th><th>发布时闸机验收</th><th>状态</th><th></th></tr>
 {% for pub, state in pubs %}
 <tr>
   <td>#{{ pub['pub_id'] }}</td>
@@ -34,11 +78,12 @@
   <td>v{{ pub['event_set_version'] }}</td>
   <td>{{ pub['trip_count'] }}</td>
   <td>{{ pub['anomaly_count'] }}</td>
+  <td>{{ gate_labels.get(pub['gate_status'], pub['gate_status']) }}</td>
   <td>{% if state == '当前有效' %}<span class="badge b-ok">当前有效</span>{% else %}<span class="badge b-stale">已过期</span>{% endif %}</td>
   <td><a href="{{ url_for('main.publication', pub_id=pub['pub_id']) }}">查看快照</a></td>
 </tr>
 {% else %}
-<tr><td colspan="7" class="muted">无</td></tr>
+<tr><td colspan="8" class="muted">无</td></tr>
 {% endfor %}
 </table>
 </div>

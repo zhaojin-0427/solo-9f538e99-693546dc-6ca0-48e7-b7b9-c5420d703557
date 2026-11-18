@@ -1,0 +1,5 @@
+card_id,event_id,revision,ts_utc,station,direction,gate_id,seq
+C105,G109,1,2026-11-16T08:20:00Z,Alpha,in,G-NORTH-01,3
+C106,G110,1,2026-11-16T08:25:00Z,Alpha,in,G-NORTH-01,5
+C105,G111,1,2026-11-16T09:45:00Z,Beta,out,G-SOUTH-02,4
+C106,G112,1,2026-11-16T09:50:00Z,Beta,out,G-SOUTH-02,6

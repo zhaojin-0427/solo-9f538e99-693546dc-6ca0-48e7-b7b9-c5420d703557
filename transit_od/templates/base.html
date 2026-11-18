@@ -18,6 +18,7 @@ th { background: #f0f2f5; }
 .b-ok { background: #e3f5e9; color: #1c7c3c; }
 .b-stale { background: #fdeceb; color: #c0352b; }
 .b-none { background: #eceff3; color: #5a6675; }
+.b-warn { background: #fff7e0; color: #8a6116; }
 .flash-ok { background: #e3f5e9; color: #1c7c3c; padding: 10px 14px; border-radius: 6px; margin-bottom: 14px; }
 .flash-err { background: #fdeceb; color: #c0352b; padding: 10px 14px; border-radius: 6px; margin-bottom: 14px; }
 button { background: #1f3a5f; color: #fff; border: 0; border-radius: 6px; padding: 7px 16px; font-size: 14px; cursor: pointer; }
@@ -31,6 +32,7 @@ form.inline { display: inline; }
 <body>
 <nav>
   <a href="{{ url_for('main.days') }}">日期与发布</a>
+  <a href="{{ url_for('main.gates') }}">闸机验收</a>
   <a href="{{ url_for('main.upload') }}">上传 CSV</a>
   <a href="{{ url_for('main.batches') }}">批次记录</a>
   <a href="{{ url_for('main.events') }}">已提交事件</a>

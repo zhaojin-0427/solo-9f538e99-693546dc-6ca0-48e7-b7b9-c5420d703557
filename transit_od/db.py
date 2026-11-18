@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS events (
   ts_epoch_us INTEGER NOT NULL,       -- UTC 微秒时间戳，用于排序与"同刻"判定
   station     TEXT NOT NULL,
   direction   TEXT NOT NULL CHECK (direction IN ('in','out')),
+  gate_id     TEXT,                   -- 闸机 ID（可选；与 seq 同时提供才计入验收）
+  seq         INTEGER CHECK (seq IS NULL OR seq > 0),  -- 按闸机、UTC 日从 1 编起的流水号
   batch_id    INTEGER NOT NULL,       -- 写入当前版本的批次
   updated_at  TEXT NOT NULL
 );
@@ -59,6 +61,15 @@ CREATE TABLE IF NOT EXISTS day_versions (
   version INTEGER NOT NULL
 );
 
+-- 闸机日终号登记（同一闸机同一 UTC 日一条当前登记）
+CREATE TABLE IF NOT EXISTS gate_day_registrations (
+  gate_id       TEXT NOT NULL,
+  day           TEXT NOT NULL,
+  end_seq       INTEGER NOT NULL CHECK (end_seq > 0),
+  registered_at TEXT NOT NULL,
+  PRIMARY KEY (gate_id, day)
+);
+
 -- 发布快照：某 UTC 日某时刻的行程/异常结果，发布后不可变
 CREATE TABLE IF NOT EXISTS publications (
   pub_id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -68,7 +79,9 @@ CREATE TABLE IF NOT EXISTS publications (
   day_version       INTEGER NOT NULL, -- 发布时该日的数据版本
   status            TEXT NOT NULL CHECK (status IN ('current','superseded')),
   trip_count        INTEGER NOT NULL,
-  anomaly_count     INTEGER NOT NULL
+  anomaly_count     INTEGER NOT NULL,
+  gate_status       TEXT NOT NULL DEFAULT 'none', -- 发布时该日闸机验收结论
+  gate_acceptance   TEXT                          -- 发布时该日闸机验收快照（JSON）
 );
 
 CREATE TABLE IF NOT EXISTS publication_trips (
@@ -110,6 +123,24 @@ def connect(db_path):
 def init_db(conn):
     conn.executescript(SCHEMA)
     conn.execute("INSERT OR IGNORE INTO meta(key, value) VALUES('event_set_version', '0')")
+    _migrate(conn)
+
+
+def _migrate(conn):
+    """就地升级旧库：补上闸机流水列与发布验收快照列（幂等）。"""
+    ev_cols = {r["name"] for r in conn.execute("PRAGMA table_info(events)")}
+    if "gate_id" not in ev_cols:
+        conn.execute("ALTER TABLE events ADD COLUMN gate_id TEXT")
+    if "seq" not in ev_cols:
+        conn.execute("ALTER TABLE events ADD COLUMN seq INTEGER")
+    pub_cols = {r["name"] for r in conn.execute("PRAGMA table_info(publications)")}
+    if "gate_status" not in pub_cols:
+        conn.execute("ALTER TABLE publications ADD COLUMN gate_status TEXT NOT NULL DEFAULT 'none'")
+    if "gate_acceptance" not in pub_cols:
+        conn.execute("ALTER TABLE publications ADD COLUMN gate_acceptance TEXT")
+    # 旧发布没有验收快照：视为"无闸机流水"快照，与旧行为一致
+    from .gates import EMPTY_SNAPSHOT
+    conn.execute("UPDATE publications SET gate_acceptance=? WHERE gate_acceptance IS NULL", (EMPTY_SNAPSHOT,))
 
 
 def get_esv(conn):

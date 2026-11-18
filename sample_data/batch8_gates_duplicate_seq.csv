@@ -1,0 +1,2 @@
+card_id,event_id,revision,ts_utc,station,direction,gate_id,seq
+C199,G199,1,2026-11-16T10:00:00Z,Alpha,in,G-NORTH-01,1

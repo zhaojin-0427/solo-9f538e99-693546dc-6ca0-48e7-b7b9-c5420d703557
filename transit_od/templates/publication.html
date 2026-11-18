@@ -5,7 +5,7 @@
 <div class="card">
 <h2>发布 #{{ pub['pub_id'] }} — UTC 日 {{ pub['day'] }}</h2>
 {% if state == '已过期' %}
-<div class="warn">此为历史/过期发布，内容保持可读；当前已提交事件集可能已变化，请以最新发布为准。</div>
+<div class="warn">此为历史/过期发布，内容保持可读；当前已提交事件集或闸机验收可能已变化，请以最新发布为准，不应继续作为可供数结果使用。</div>
 {% endif %}
 <p class="muted">发布时间 {{ pub['created_at'] }} ｜ 基于已提交事件集版本 v{{ pub['event_set_version'] }} ｜ 状态：
   {% if state == '当前有效' %}<span class="badge b-ok">当前有效</span>{% else %}<span class="badge b-stale">已过期</span>{% endif %}
@@ -14,5 +14,31 @@
 {{ p.trip_table(trips) }}
 <h3>异常（{{ pub['anomaly_count'] }}）</h3>
 {{ p.anomaly_table(anomalies, reasons) }}
+</div>
+
+<div class="card">
+<h3>发布时的闸机流水验收快照：
+  {% if gate_snapshot.status == 'complete' %}<span class="badge b-ok">完整</span>
+  {% elif gate_snapshot.status == 'incomplete' %}<span class="badge b-stale">缺号</span>
+  {% elif gate_snapshot.status == 'pending' %}<span class="badge b-warn">待登记终号</span>
+  {% else %}<span class="badge b-none">无闸机流水</span>{% endif %}
+</h3>
+{% if gate_snapshot.entries %}
+<table>
+<tr><th>闸机 ID</th><th>登记终号</th><th>已收到流水</th><th>最大号</th><th>缺号区间</th><th>状态</th></tr>
+{% for e in gate_snapshot.entries %}
+<tr>
+  <td>{{ e.gate_id }}</td>
+  <td>{{ e.end_seq if e.end_seq is not none else '—' }}</td>
+  <td>{{ e.present_count }}</td>
+  <td>{{ e.max_seq if e.max_seq is not none else '—' }}</td>
+  <td>{{ e.missing_ranges|join('; ') if e.missing_ranges else '—' }}</td>
+  <td>{{ e.status_label }}</td>
+</tr>
+{% endfor %}
+</table>
+{% else %}
+<p class="muted">发布时该日没有闸机流水。</p>
+{% endif %}
 </div>
 {% endblock %}

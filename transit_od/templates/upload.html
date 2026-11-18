@@ -4,11 +4,13 @@
 <div class="card">
 <h2>上传刷卡记录 CSV</h2>
 <p>必需列（表头不区分大小写）：<code>card_id,event_id,revision,ts_utc,station,direction</code></p>
+<p>可选列：<code>gate_id,seq</code>（闸机 ID 与按闸机、UTC 日从 1 编起的流水号；用于闸机日流水验收）</p>
 <ul class="muted">
   <li><code>revision</code> 为正整数：同一 event_id 仅更高修订替换旧值；同版同文重传沿用旧值；同版异文判冲突，整批失败。</li>
   <li><code>ts_utc</code> 为 ISO 8601 UTC 时刻，如 <code>2026-11-16T23:30:00Z</code>。</li>
   <li><code>direction</code> 取值 in / out（兼容 entry / exit、进 / 出）。</li>
-  <li>同一卡号同一时刻出现不同事件，或存在任何冲突，整个批次失败并回滚，不产生半份结果。</li>
+  <li><code>gate_id</code> 与 <code>seq</code> 须同时提供；旧文件可不上传这两列，缺少流水号的记录不计入验收。</li>
+  <li>同一闸机同一 UTC 日的同一流水号落在不同事件、同一卡号同一时刻出现不同事件、或存在任何冲突，整个批次失败并回滚，不产生半份结果。</li>
 </ul>
 <form method="post" enctype="multipart/form-data">
   <input type="file" name="file" accept=".csv" required>
